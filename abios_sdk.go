@@ -137,6 +137,8 @@ func (a *client) authenticate() *result {
 func (a *client) Games(params Parameters) (GameStructPaginated, *ErrorStruct) {
 	if params == nil {
 		params = make(Parameters)
+	} else {
+		params = copyParams(params)
 	}
 	params.Set("access_token", a.oauth.AccessToken)
 	result := <-a.handler.addRequest(games, params)
@@ -159,7 +161,10 @@ func (a *client) Games(params Parameters) (GameStructPaginated, *ErrorStruct) {
 func (a *client) Series(params Parameters) (SeriesStructPaginated, *ErrorStruct) {
 	if params == nil {
 		params = make(Parameters)
+	} else {
+		params = copyParams(params)
 	}
+
 	params.Set("access_token", a.oauth.AccessToken)
 	result := <-a.handler.addRequest(series, params)
 
@@ -182,7 +187,10 @@ func (a *client) SeriesById(id int, params Parameters) (SeriesStruct, *ErrorStru
 	sId := strconv.Itoa(id)
 	if params == nil {
 		params = make(Parameters)
+	} else {
+		params = copyParams(params)
 	}
+
 	params.Set("access_token", a.oauth.AccessToken)
 	result := <-a.handler.addRequest(seriesById+sId, params)
 
@@ -205,7 +213,10 @@ func (a *client) MatchesById(id int, params Parameters) (MatchStruct, *ErrorStru
 	sId := strconv.Itoa(id)
 	if params == nil {
 		params = make(Parameters)
+	} else {
+		params = copyParams(params)
 	}
+
 	params.Set("access_token", a.oauth.AccessToken)
 	result := <-a.handler.addRequest(matches+sId, params)
 
@@ -227,7 +238,10 @@ func (a *client) MatchesById(id int, params Parameters) (MatchStruct, *ErrorStru
 func (a *client) Tournaments(params Parameters) (TournamentStructPaginated, *ErrorStruct) {
 	if params == nil {
 		params = make(Parameters)
+	} else {
+		params = copyParams(params)
 	}
+
 	params.Set("access_token", a.oauth.AccessToken)
 	result := <-a.handler.addRequest(tournaments, params)
 
@@ -250,7 +264,10 @@ func (a *client) TournamentsById(id int, params Parameters) (TournamentStruct, *
 	sId := strconv.Itoa(id)
 	if params == nil {
 		params = make(Parameters)
+	} else {
+		params = copyParams(params)
 	}
+
 	params.Set("access_token", a.oauth.AccessToken)
 	result := <-a.handler.addRequest(tournamentsById+sId, params)
 
@@ -273,7 +290,10 @@ func (a *client) SubstagesById(id int, params Parameters) (SubstageStruct, *Erro
 	sId := strconv.Itoa(id)
 	if params == nil {
 		params = make(Parameters)
+	} else {
+		params = copyParams(params)
 	}
+
 	params.Set("access_token", a.oauth.AccessToken)
 	result := <-a.handler.addRequest(substages+sId, params)
 
@@ -295,7 +315,10 @@ func (a *client) SubstagesById(id int, params Parameters) (SubstageStruct, *Erro
 func (a *client) Teams(params Parameters) (TeamStructPaginated, *ErrorStruct) {
 	if params == nil {
 		params = make(Parameters)
+	} else {
+		params = copyParams(params)
 	}
+
 	params.Set("access_token", a.oauth.AccessToken)
 	result := <-a.handler.addRequest(teams, params)
 
@@ -318,7 +341,10 @@ func (a *client) TeamsById(id int, params Parameters) (TeamStruct, *ErrorStruct)
 	sId := strconv.Itoa(id)
 	if params == nil {
 		params = make(Parameters)
+	} else {
+		params = copyParams(params)
 	}
+
 	params.Set("access_token", a.oauth.AccessToken)
 	result := <-a.handler.addRequest(teamsById+sId, params)
 
@@ -340,7 +366,10 @@ func (a *client) TeamsById(id int, params Parameters) (TeamStruct, *ErrorStruct)
 func (a *client) Players(params Parameters) (PlayerStructPaginated, *ErrorStruct) {
 	if params == nil {
 		params = make(Parameters)
+	} else {
+		params = copyParams(params)
 	}
+
 	params.Set("access_token", a.oauth.AccessToken)
 	result := <-a.handler.addRequest(players, params)
 
@@ -363,7 +392,10 @@ func (a *client) PlayersById(id int, params Parameters) (PlayerStruct, *ErrorStr
 	sId := strconv.Itoa(id)
 	if params == nil {
 		params = make(Parameters)
+	} else {
+		params = copyParams(params)
 	}
+
 	params.Set("access_token", a.oauth.AccessToken)
 	result := <-a.handler.addRequest(playersById+sId, params)
 
@@ -386,7 +418,10 @@ func (a *client) RostersById(id int, params Parameters) (RosterStruct, *ErrorStr
 	sId := strconv.Itoa(id)
 	if params == nil {
 		params = make(Parameters)
+	} else {
+		params = copyParams(params)
 	}
+
 	params.Set("access_token", a.oauth.AccessToken)
 	result := <-a.handler.addRequest(rosters+sId, params)
 
@@ -467,4 +502,14 @@ func (a *client) IncidentsBySeriesId(id int) (SeriesIncidentsStruct, *ErrorStruc
 	}
 
 	return SeriesIncidentsStruct{}, &ErrorStruct{}
+}
+
+// copyParams copies the parameters to a new map so different routines don't share a
+// non-thread-safe map.
+func copyParams(from Parameters) (to Parameters) {
+	to = make(Parameters)
+	for k, v := range from {
+		to[k] = v
+	}
+	return
 }
