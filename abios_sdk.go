@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"time"
 
-	. "github.com/AbiosGaming/go-sdk-v2/structs"
+	. "github.com/PatronGG/abios-go-sdk/structs"
 )
 
 // Constant variables that represents endpoints
@@ -30,6 +30,8 @@ const (
 	search            = baseUrl + "search"
 	incidents         = baseUrl + "incidents"
 	incidentsBySeries = incidents + "/"
+	organisations     = baseUrl + "organisations"
+	organisationsById = organisations + "/"
 )
 
 // AbiosSdk defines the interface of an implementation of a SDK targeting the Abios endpoints.
@@ -50,6 +52,8 @@ type AbiosSdk interface {
 	Search(query string, params Parameters) ([]SearchResultStruct, *ErrorStruct)
 	Incidents(params Parameters) (IncidentStructPaginated, *ErrorStruct)
 	IncidentsBySeriesId(id int) (SeriesIncidentsStruct, *ErrorStruct)
+	Organisations(params Parameters) (OrganisationStructPaginated, *ErrorStruct)
+	OrganisationsById(id int, params Parameters) (OrganisationStructPaginated, *ErrorStruct)
 }
 
 // client holds the oauth string returned from Authenticate as well as this sessions
@@ -467,4 +471,49 @@ func (a *client) IncidentsBySeriesId(id int) (SeriesIncidentsStruct, *ErrorStruc
 	}
 
 	return SeriesIncidentsStruct{}, &ErrorStruct{}
+}
+
+// Organisations queries the /organisations endpoint and returns a OrganisationStructPaginated
+func (a *client) Organisations(params Parameters) (OrganisationStructPaginated, *ErrorStruct) {
+	if params == nil {
+		params = make(Parameters)
+	}
+	params.Set("access_token", a.oauth.AccessToken)
+	result := <-a.handler.addRequest(organisations, params)
+
+	dec := json.NewDecoder(bytes.NewBuffer(result.body))
+	if 200 <= result.statuscode && result.statuscode < 300 {
+		target := OrganisationStructPaginated{}
+		dec.Decode(&target)
+		return target, nil
+	} else {
+		target := ErrorStruct{}
+		dec.Decode(&target)
+		return OrganisationStructPaginated{}, &target
+	}
+
+	return OrganisationStructPaginated{}, &ErrorStruct{}
+}
+
+// OrganisationsById queues the /organisations/:id endpoint and return a OrganisationStruct.
+func (a *client) OrganisationsById(id int, params Parameters) (OrganisationStruct, *ErrorStruct) {
+	sId := strconv.Itoa(id)
+	if params == nil {
+		params = make(Parameters)
+	}
+	params.Set("access_token", a.oauth.AccessToken)
+	result := <-a.handler.addRequest(organisationsById+sId, params)
+
+	dec := json.NewDecoder(bytes.NewBuffer(result.body))
+	if 200 <= result.statuscode && result.statuscode < 300 {
+		target := OrganisationStruct{}
+		dec.Decode(&target)
+		return target, nil
+	} else {
+		target := ErrorStruct{}
+		dec.Decode(&target)
+		return OrganisationStruct{}, &target
+	}
+
+	return OrganisationStruct{}, &ErrorStruct{}
 }
