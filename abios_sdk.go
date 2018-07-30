@@ -3,11 +3,14 @@ package abios
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 
 	. "github.com/PatronGG/abios-go-sdk/structs"
+	"github.com/gobuffalo/uuid"
 )
 
 // Constant variables that represents endpoints
@@ -32,6 +35,12 @@ const (
 	incidentsBySeries = incidents + "/"
 	organisations     = baseUrl + "organisations"
 	organisationsById = organisations + "/"
+
+	// PUSH API
+	wsBaseUrl         = "https://ws.abiosgaming.com/v0/"
+	subscriptions     = wsBaseUrl + "subscription"
+	subscriptionsById = subscriptions + "/"
+	pushConfig        = wsBaseUrl + "/config"
 )
 
 // AbiosSdk defines the interface of an implementation of a SDK targeting the Abios endpoints.
@@ -54,6 +63,13 @@ type AbiosSdk interface {
 	IncidentsBySeriesId(id int) (SeriesIncidentsStruct, *ErrorStruct)
 	Organisations(params Parameters) (OrganisationStructPaginated, *ErrorStruct)
 	OrganisationsById(id int, params Parameters) (OrganisationStructPaginated, *ErrorStruct)
+
+	// PUSH API
+	CreateSubscription(sub Subscription) (uuid.UUID, error)
+	ListSubscriptions() ([]Subscription, error)
+	// UpdateSubscription(id int, sub Subscription) (Subscription, error)
+	// DeleteSubscription(id int) error
+	// PushServiceConfig() ([]byte, error)
 }
 
 // client holds the oauth string returned from Authenticate as well as this sessions
@@ -517,3 +533,106 @@ func (a *client) OrganisationsById(id int, params Parameters) (OrganisationStruc
 
 	return OrganisationStruct{}, &ErrorStruct{}
 }
+
+func (a *client) CreateSubscription(sub Subscription) (uuid.UUID, error) {
+	params := make(Parameters)
+	params.Set("access_token", a.oauth.AccessToken)
+
+	u, err := url.Parse(subscriptions)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	u.RawQuery = params.encode()
+
+	subStr, err := json.Marshal(sub)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	res, err := http.Post(u.String(), "application/json", bytes.NewBuffer(subStr))
+	defer res.Body.Close()
+
+	if err != nil {
+		dec := json.NewDecoder(res.Body)
+		if res.StatusCode == http.StatusOK {
+			s := Message{}
+			err = dec.Decode(&s)
+			return s.UUID, nil
+		} else if res.StatusCode == http.StatusUnprocessableEntity {
+			var existingID uuid.UUID
+
+			if res.Header.Get("Location") != "" {
+				existingID, err = uuid.FromString(res.Header.Get("Location"))
+				if err != nil {
+					return uuid.Nil, err
+				}
+
+				return existingID, nil
+			}
+		}
+		return uuid.Nil, fmt.Errorf("Unexpected status code %v", res.StatusCode)
+	}
+
+	return uuid.Nil, err
+}
+
+func (a *client) ListSubscriptions() ([]Subscription, error) {
+	subs := []Subscription{}
+
+	params := make(Parameters)
+	params.Set("access_token", a.oauth.AccessToken)
+
+	u, err := url.Parse(subscriptions)
+	if err != nil {
+		return subs, err
+	}
+	u.RawQuery = params.encode()
+	res, err := http.Get(u.String())
+	defer res.Body.Close()
+
+	dec := json.NewDecoder(res.Body)
+	if res.StatusCode == http.StatusOK {
+		dec.Decode(&subs)
+		return subs, nil
+	}
+
+	return subs, fmt.Errorf("Unexpected status code %v", res.StatusCode)
+}
+
+func (a *client) DeleteSubscription(id uuid.UUID) error {
+	params := make(Parameters)
+	params.Set("access_token", a.oauth.AccessToken)
+
+	u, err := url.Parse(subscriptionsById + id.String())
+	if err != nil {
+		return err
+	}
+	u.RawQuery = params.encode()
+
+	req, err := http.NewRequest("DELETE", u.String(), nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Add("Content-Type", "application/json")
+
+	client := http.Client{}
+	res, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode == http.StatusOK {
+		return nil
+	}
+
+	return fmt.Errorf("Unexpected status code %v", res.StatusCode)
+}
+
+/*
+func (a *client) UpdateSubscription(id int, sub Subscription) (Subscription, error) {
+
+}
+func (a *client) PushServiceConfig() ([]byte, error) {
+
+}
+*/
