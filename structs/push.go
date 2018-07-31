@@ -22,7 +22,7 @@ type SeriesMessage struct {
 	Message
 	CreatedTimestamp int64         `json:"created_timestamp"`
 	Payload          SeriesPayload `json:"payload"`
-	Raw              string        `json:"-"`
+	Raw              []byte        `json:"-"`
 }
 
 type Diff struct {

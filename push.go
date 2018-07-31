@@ -132,7 +132,12 @@ func (a *client) messageReadLoop(subscriptionID uuid.UUID, series chan<- SeriesM
 		if closeErr, ok := err.(*websocket.CloseError); ok {
 			log.Printf("[INFO]: Websocket was closed, starting reconnect loop. Reason='%s'\n", closeErr.Error())
 
-			// TODO: make sure to generate a new access token as the original one may be too old
+			authErr := a.authenticate()
+			if authErr != nil {
+				errors <- fmt.Errorf("%v", authErr)
+				return
+			}
+
 			err = a.PushServiceConnect(subscriptionID)
 			if err != nil {
 				errors <- err
@@ -165,7 +170,7 @@ func (a *client) messageReadLoop(subscriptionID uuid.UUID, series chan<- SeriesM
 				continue
 			}
 
-			s.Raw = string(message)
+			s.Raw = message
 			series <- s
 		}
 
