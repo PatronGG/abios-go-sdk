@@ -35,10 +35,11 @@ const (
 	organisationsById = organisations + "/"
 
 	// PUSH API
-	wsBaseUrl         = "https://ws.abiosgaming.com/v0/"
-	subscriptions     = wsBaseUrl + "subscription"
+	wsBaseUrl         = "wss://ws.abiosgaming.com/v0"
+	wsRestUrl         = "https://ws.abiosgaming.com/v0/"
+	subscriptions     = wsRestUrl + "subscription"
 	subscriptionsById = subscriptions + "/"
-	pushConfig        = wsBaseUrl + "/config"
+	pushConfig        = wsRestUrl + "/config"
 )
 
 // AbiosSdk defines the interface of an implementation of a SDK targeting the Abios endpoints.
@@ -116,7 +117,14 @@ func (a *client) authenticator() {
 // NewAbios returns a new endpoint-wrapper for api version 2 with given credentials.
 func New(username, password string) *client {
 	r := newRequestHandler()
-	c := &client{username, password, AccessTokenStruct{}, r}
+	c := &client{
+		username:       username,
+		password:       password,
+		oauth:          AccessTokenStruct{},
+		handler:        r,
+		wsConn:         nil,
+		reconnectToken: uuid.Nil,
+	}
 	err := c.authenticate()
 	if err != nil {
 		c.handler.override = responseOverride{override: true, data: *err}

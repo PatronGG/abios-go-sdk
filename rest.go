@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strconv"
 
+	. "github.com/PatronGG/abios-go-sdk/structs"
 	"github.com/gobuffalo/uuid"
 )
 
@@ -407,28 +408,76 @@ func (a *client) CreateSubscription(sub Subscription) (uuid.UUID, error) {
 		return uuid.Nil, err
 	}
 	res, err := http.Post(u.String(), "application/json", bytes.NewBuffer(subStr))
-	defer res.Body.Close()
-
 	if err != nil {
-		dec := json.NewDecoder(res.Body)
-		if res.StatusCode == http.StatusOK {
-			s := Message{}
-			err = dec.Decode(&s)
-			return s.UUID, nil
-		} else if res.StatusCode == http.StatusUnprocessableEntity {
-			var existingID uuid.UUID
-
-			if res.Header.Get("Location") != "" {
-				existingID, err = uuid.FromString(res.Header.Get("Location"))
-				if err != nil {
-					return uuid.Nil, err
-				}
-
-				return existingID, nil
-			}
-		}
-		return uuid.Nil, fmt.Errorf("Unexpected status code %v", res.StatusCode)
+		return uuid.Nil, err
 	}
 
-	return uuid.Nil, err
+	defer res.Body.Close()
+	dec := json.NewDecoder(res.Body)
+	if res.StatusCode == http.StatusOK {
+		s := &OnlyID{}
+		err = dec.Decode(s)
+		return s.ID, err
+	} else if res.StatusCode == http.StatusUnprocessableEntity {
+		if res.Header.Get("Location") != "" {
+			return uuid.FromString(res.Header.Get("Location"))
+		}
+	}
+	return uuid.Nil, fmt.Errorf("Unexpected status code %v", res.StatusCode)
+}
+
+func (a *client) ListSubscriptions() ([]Subscription, error) {
+	params := make(Parameters)
+	params.Set("access_token", a.oauth.AccessToken)
+
+	u, err := url.Parse(subscriptions)
+	if err != nil {
+		return nil, err
+	}
+	u.RawQuery = params.encode()
+	res, err := http.Get(u.String())
+	if err != nil {
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	subs := []Subscription{}
+
+	dec := json.NewDecoder(res.Body)
+	if res.StatusCode == http.StatusOK {
+		dec.Decode(&subs)
+		return subs, nil
+	}
+
+	return subs, fmt.Errorf("Unexpected status code %v", res.StatusCode)
+}
+
+func (a *client) DeleteSubscription(id uuid.UUID) error {
+	params := make(Parameters)
+	params.Set("access_token", a.oauth.AccessToken)
+
+	u, err := url.Parse(subscriptionsById + id.String())
+	if err != nil {
+		return err
+	}
+	u.RawQuery = params.encode()
+
+	req, err := http.NewRequest("DELETE", u.String(), nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Add("Content-Type", "application/json")
+
+	client := http.Client{}
+	res, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode == http.StatusOK {
+		return nil
+	}
+
+	return fmt.Errorf("Unexpected status code %v", res.StatusCode)
 }

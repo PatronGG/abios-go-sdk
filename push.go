@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"net/http"
 	"net/url"
 	"time"
 
@@ -14,58 +13,20 @@ import (
 	. "github.com/PatronGG/abios-go-sdk/structs"
 )
 
-func (a *client) ListSubscriptions() ([]Subscription, error) {
-	subs := []Subscription{}
-
-	params := make(Parameters)
-	params.Set("access_token", a.oauth.AccessToken)
-
-	u, err := url.Parse(subscriptions)
-	if err != nil {
-		return subs, err
-	}
-	u.RawQuery = params.encode()
-	res, err := http.Get(u.String())
-	defer res.Body.Close()
-
-	dec := json.NewDecoder(res.Body)
-	if res.StatusCode == http.StatusOK {
-		dec.Decode(&subs)
-		return subs, nil
-	}
-
-	return subs, fmt.Errorf("Unexpected status code %v", res.StatusCode)
-}
-
-func (a *client) DeleteSubscription(id uuid.UUID) error {
-	params := make(Parameters)
-	params.Set("access_token", a.oauth.AccessToken)
-
-	u, err := url.Parse(subscriptionsById + id.String())
-	if err != nil {
-		return err
-	}
-	u.RawQuery = params.encode()
-
-	req, err := http.NewRequest("DELETE", u.String(), nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Add("Content-Type", "application/json")
-
-	client := http.Client{}
-	res, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer res.Body.Close()
-
-	if res.StatusCode == http.StatusOK {
-		return nil
-	}
-
-	return fmt.Errorf("Unexpected status code %v", res.StatusCode)
-}
+// Custom status codes sent by the server for the 'close' command.
+// The websocket standard (RFC6455) allocates the
+// 4000-4999 range to application specific status codes.
+const (
+	CloseMissingAccessToken    = 4000 // Missing access token in ws setup request
+	CloseInvalidAccessToken    = 4001 // Invalid access token in ws setup request
+	CloseNotAuthorized         = 4002 // Client account does not have access to the push API
+	CloseMaxNumSubscribers     = 4003 // Max number of concurrent subscribers connected for client id
+	CloseMaxNumSubscriptions   = 4004 // Max number of registered subscriptions exist for client id
+	CloseInvalidReconnectToken = 4005 // Invalid reconnect token in ws setup request
+	CloseMissingSubscriptionID = 4006 // Missing subscription id in ws setup request
+	CloseUnknownSubscriptionID = 4007 // The supplied subscriber id in ws setup request does not exist in server
+	CloseInternalError         = 4500 // Unspecified error due to problem in server
+)
 
 /*
 func (a *client) UpdateSubscription(id int, sub Subscription) (Subscription, error) {
@@ -76,25 +37,31 @@ func (a *client) PushServiceConfig() ([]byte, error) {
 }
 */
 
-const timestampMillisFormat = "2006-01-02 15:04:05.000"
-
-func (a *client) PushServiceConnect() error {
+func (a *client) PushServiceConnect(subscriptionID uuid.UUID) error {
 	params := make(Parameters)
 	params.Set("access_token", a.oauth.AccessToken)
+	params.Set("subscription_id", subscriptionID.String())
 
 	if a.reconnectToken != uuid.Nil {
 		params.Set("reconnect_token", a.reconnectToken.String())
 	}
+
+	u, err := url.Parse(wsBaseUrl)
+	if err != nil {
+		return err
+	}
+	u.RawQuery = params.encode()
+
+	log.Printf("[INFO] Dialing to socket '%v'\n", u.String())
+
 	var dialer *websocket.Dialer
-	conn, res, err := dialer.Dial(wsBaseUrl, nil)
+	conn, res, err := dialer.Dial(u.String(), nil)
 
 	if err == websocket.ErrBadHandshake {
-		fmt.Printf("%s [ERROR]: Failed to connect to WS url. Handshake status='%d'\n",
-			time.Now().Format(timestampMillisFormat), res.StatusCode)
+		log.Printf("[ERROR]: Failed to connect to WS url. Handshake status='%d'\n", res.StatusCode)
 		return err
 	} else if err != nil {
-		fmt.Printf("%s [ERROR]: Failed to connect to WS url. Error='%s'\n",
-			time.Now().Format(timestampMillisFormat), err.Error())
+		log.Printf("[ERROR]: Failed to connect to WS url. Error='%s'\n", err.Error())
 		return err
 	}
 
@@ -103,38 +70,37 @@ func (a *client) PushServiceConnect() error {
 	return nil
 }
 
-func (a *client) PushServiceInit() error {
-	if err := a.PushServiceConnect(); err != nil {
-		return err
+func (a *client) PushServiceInit(subscriptionID uuid.UUID) (chan SeriesMessage, chan error) {
+	errors := make(chan error, 1)
+	series := make(chan SeriesMessage, 1)
+
+	if err := a.PushServiceConnect(subscriptionID); err != nil {
+		errors <- err
+		return series, errors
 	}
 
-	initMsg, err := a.readInitMessage()
+	initMsg, err := a.handleInitMessage(subscriptionID)
 	if err != nil {
-		return err
+		errors <- err
+		return series, errors
 	}
 	a.reconnectToken = initMsg.ReconnectToken
 
-	errs := make(chan error, 1)
+	go a.keepAliveLoop(errors)
+	go a.messageReadLoop(subscriptionID, series, errors)
 
-	go keepAliveLoop(errs)
-	go messageReadLoop(errs)
-
-	for _, e := range errors {
-		fmt.Println(e)
-	}
-
-	return nil
+	return series, errors
 }
 
-func (a *client) handleInitMessage() (InitResponseMessage, error) {
+func (a *client) handleInitMessage(subscriptionID uuid.UUID) (InitResponseMessage, error) {
 	var m InitResponseMessage
 
-	_, message, err := a.conn.ReadMessage()
+	_, message, err := a.wsConn.ReadMessage()
 	if closeErr, ok := err.(*websocket.CloseError); ok {
 		var errMsg string
 		switch closeErr.Code {
 		case CloseUnknownSubscriptionID:
-			errMsg = fmt.Sprintf("Subscription ID '%s' is not registered on server", subscriptionIDOrName)
+			errMsg = fmt.Sprintf("Subscription ID '%s' is not registered on server", subscriptionID)
 		case CloseMissingSubscriptionID:
 			errMsg = "Missing subscription ID or name in setup request"
 		case CloseMaxNumSubscribers:
@@ -147,37 +113,27 @@ func (a *client) handleInitMessage() (InitResponseMessage, error) {
 			errMsg = fmt.Sprintf("Server sent unrecognized error code %d", closeErr.Code)
 		}
 
-		fmt.Printf("%s [ERROR]: Server closed connection: %s\n",
-			time.Now().Format(timestampMillisFormat), errMsg)
+		log.Printf("[ERROR]: Server closed connection: %s\n", errMsg)
 		return m, err
 	} else if err != nil {
 		// Websocket read encountered some other error, we won't try to recover
-		fmt.Printf("%s [ERROR]: Failed to read `init' message. Error='%s'\n",
-			time.Now().Format(timestampMillisFormat), err.Error())
+		log.Printf("[ERROR]: Failed to read `init' message. Error='%s'\n", err.Error())
 		return m, err
 	}
 
-	json.Unmarshal(initMsg, &m)
+	json.Unmarshal(message, &m)
 	return m, nil
 }
 
-// This will read messages from the server and print them to stdout.
-// If the websocket is closed it will automatically re-establish the
-// connection using the reconnect token to ensure no messages were lost
-// during the disconnect.
-func (a *client) messageReadLoop(errors <-chan error) {
-	// From here on we will start receiving push events that match our
-	// subscription filters
+func (a *client) messageReadLoop(subscriptionID uuid.UUID, series chan<- SeriesMessage, errors chan<- error) {
 	for {
-		_, message, err := conn.ReadMessage()
+		_, message, err := a.wsConn.ReadMessage()
 
-		// If the websocket is closed we need to reconnect
 		if closeErr, ok := err.(*websocket.CloseError); ok {
-			fmt.Printf("%s [INFO]: Websocket was closed, starting reconnect loop. Reason='%s'\n",
-				time.Now().Format(timestampMillisFormat), closeErr.Error())
+			log.Printf("[INFO]: Websocket was closed, starting reconnect loop. Reason='%s'\n", closeErr.Error())
 
 			// TODO: make sure to generate a new access token as the original one may be too old
-			err = a.PushServiceConnect()
+			err = a.PushServiceConnect(subscriptionID)
 			if err != nil {
 				errors <- err
 				return
@@ -185,37 +141,44 @@ func (a *client) messageReadLoop(errors <-chan error) {
 
 			continue
 		} else if err != nil {
-			// Websocket read encountered some other error, we won't try to recover
-			fmt.Printf("%s [ERROR]: Failed to read message. Error='%s'\n",
-				time.Now().Format(timestampMillisFormat), err.Error())
+			log.Printf("[ERROR]: Failed to read message. Error='%s'\n", err.Error())
 			errors <- err
 			return
 		}
 
-		// Sanity check that the JSON can be marshalled into the correct message
-		// format
+		// sanity check
 		var m PushMessage
 		err = json.Unmarshal(message, &m)
 		if err != nil {
-			fmt.Printf("%s [ERROR]: Failed to unmarshal to message struct. Error='%s', Message='%s'\n",
-				time.Now().Format(timestampMillisFormat), err.Error(), message)
+			log.Printf("[ERROR]: Failed to unmarshal to message struct. Error='%s', Message='%s'\n", err.Error(), message)
 			errors <- err
-			// Ignore message and keep reading from websocket
 			continue
 		}
 
-		log.Printf("msg: %v\n", message)
+		switch m.Channel {
+		case "series":
+			var s SeriesMessage
+			err = json.Unmarshal(message, &s)
+			if err != nil {
+				log.Printf("[ERROR]: Failed to unmarshal to message struct. Error='%s', Message='%s'\n", err.Error(), message)
+				errors <- err
+				continue
+			}
+
+			s.Raw = string(message)
+			series <- s
+		}
+
 	}
 }
 
-func (a *client) keepAliveLoop(errors <-chan error) {
+func (a *client) keepAliveLoop(errors chan<- error) {
 	for {
 		time.Sleep(time.Second * 30)
-		if conn != nil {
-			err := a.conn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(3*time.Second))
+		if a.wsConn != nil {
+			err := a.wsConn.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(3*time.Second))
 			if err != nil {
-				fmt.Printf("%s [ERROR]: Failed to send Ping message. Error='%s'\n",
-					time.Now().Format(timestampMillisFormat), err.Error())
+				log.Printf("[ERROR]: Failed to send Ping message. Error='%s'\n", err.Error())
 				errors <- err
 				continue
 			}

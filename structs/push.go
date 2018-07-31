@@ -2,6 +2,10 @@ package structs
 
 import "github.com/gobuffalo/uuid"
 
+type OnlyID struct {
+	ID uuid.UUID `json:"id"`
+}
+
 // Base for all messages published to end-consumers
 type Message struct {
 	Channel string    `json:"channel"`
@@ -12,6 +16,39 @@ type PushMessage struct {
 	Message
 	CreatedTimestamp int64                  `json:"created_timestamp"`
 	Payload          map[string]interface{} `json:"payload"`
+}
+
+type SeriesMessage struct {
+	Message
+	CreatedTimestamp int64         `json:"created_timestamp"`
+	Payload          SeriesPayload `json:"payload"`
+	Raw              string        `json:"-"`
+}
+
+type Diff struct {
+	Attribute string      `json:"attribute"`
+	Before    interface{} `json:"before"`
+	After     interface{} `json:"after"`
+}
+
+const (
+	// SeriesPayloadType
+	SeriesPayloadTypeCreated = "CREATED"
+	SeriesPayloadTypeUpdated = "UPDATED"
+	SeriesPayloadTypeDeleted = "DELETED"
+	// SeriesPayloadEvent
+	SeriesPayloadEventMoved  = "moved"
+	SeriesPayloadEventScored = "scored"
+	SeriesPayloadEventMap    = "map"
+	SeriesPayloadEventWon    = "won"
+	SeriesPayloadEventEnded  = "ended"
+)
+
+type SeriesPayload struct {
+	Type   string       `json:"type"`
+	Events []string     `json:"events"`
+	State  SeriesStruct `json:"state"`
+	Diff   []Diff       `json:"diff"`
 }
 
 // Base for messages sent on the 'system' channel
