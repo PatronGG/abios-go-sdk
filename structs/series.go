@@ -27,6 +27,7 @@ type SeriesStruct struct {
 	Casters         []CasterStruct          `json:"casters,omitempty"`
 	SubstageId      int64                   `json:"substage_id,omitempty"`
 	BracketPosition *BracketPositionStruct  `json:"bracket_pos"`
+	TournamentID    int64                   `json:"tournament_id,omitempty"`
 	Tournament      TournamentStruct        `json:"tournament,omitempty"`
 	Performance     SeriesPerformanceStruct `json:"performance,omitempty"`
 	SportsbookOdds  []SportsbookOddsStruct  `json:"sportsbook_odds"`
